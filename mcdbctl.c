@@ -22,6 +22,8 @@
  * mcdb is originally based upon the Public Domain cdb-0.75 by Dan Bernstein
  */
 
+#define _GNU_SOURCE
+
 #ifndef _POSIX_C_SOURCE
 #define _POSIX_C_SOURCE 200112L
 #endif
@@ -366,7 +368,31 @@ mcdbctl_query(const int argc, char ** restrict argv)
             exit(100); /* not found: exit nonzero without errmsg */
         break;
       case MCDBCTL_GETALL:
-        rv = mcdbctl_getall(&m, argv[3]);       /* key = argv[3] */
+        if (strcmp(argv[3], "*") == 0) {
+            char *key = NULL;
+            size_t keyLength;
+            while (getline(&key, &keyLength, stdin) != -1) {
+                if (keyLength > 0) {
+                    size_t len = strlen(key) - 1;
+                    if (key[len] == '\n')
+                        key[len] = '\0';
+                    struct iovec iov[2];
+                    iov[0].iov_base = key;
+                    iov[0].iov_len  = strlen(key);
+                    iov[1].iov_base = "\n";
+                    iov[1].iov_len  = 1;
+                    if (!writev_loop(STDOUT_FILENO,iov,2,(ssize_t)(iov[0].iov_len+1)))
+                        return MCDB_ERROR_WRITE;
+                    rv = mcdbctl_getall(&m, key);
+                }
+                free(key);
+                key = NULL;
+            }
+            if (key != NULL)
+                free(key);
+        } else {
+            rv = mcdbctl_getall(&m, argv[3]);       /* key = argv[3] */
+        }
         if (rv == EXIT_FAILURE)
             exit(100); /* not found: exit nonzero without errmsg */
         break;
@@ -538,10 +564,14 @@ static const char * const restrict mcdb_usage =
    "         mcdbctl uniq  <fname.mcdb> [\"first\"|\"last\"]\n"
    "         mcdbctl dump  <fname.mcdb>\n"
    "         mcdbctl stats <fname.mcdb>\n"
-   "         mcdbctl get   <fname.mcdb> <key> [seq]\n";
+   "         mcdbctl get   <fname.mcdb> <key> [seq]\n"
+   "         mcdbctl get   <fname.mcdb> <key> all\n"
+   "         mcdbctl get   <fname.mcdb> * all\n";
 
 /*
  * mcdbctl get   <mcdb> <key> [seq]
+ * mcdbctl get   <mcdb> <key> all
+ * mcdbctl get   <mcdb> * all
  * mcdbctl dump  <mcdb>
  * mcdbctl stats <mcdb>
  * mcdbctl make  <mcdb> <input-file>
